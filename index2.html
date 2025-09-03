@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cannon Game</title>
+  <style>
+    canvas {
+      background: #111;
+      display: block;
+      margin: 0 auto;
+    }
+    body {
+      background: black;
+      color: white;
+      text-align: center;
+      font-family: sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <h1>Cannon Defense</h1>
+  <canvas id="gameCanvas" width="600" height="600"></canvas>
+  <h2 id="scoreDisplay"></h2>
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Initial game state
+    let gameState = {
+      cannon: { x: canvas.width/2, y: canvas.height/2, angle: 0 },
+      projectiles: [],
+      enemies: [],
+      score: 0,
+      frameCount: 0,
+      startTime: Date.now(),
+      gameOver: false
+    };
+
+    const gameDuration = 20000; // 20 seconds
+
+    // AI function: returns { input, nextState }
+    function getAIInput(state) {
+      // Example: aimlessly rotate right and shoot every 20 frames
+      const input = {
+        left: false,
+        right: true,
+        shoot: state.frameCount % 20 === 0
+      };
+
+      const nextState = simulateNextState(state, input);
+      return { input, nextState };
+    }
+
+    // Simulation step
+    function simulateNextState(state, input) {
+      // Clone state
+      const newState = {
+        cannon: { ...state.cannon },
+        projectiles: state.projectiles.map(p => ({...p})),
+        enemies: state.enemies.map(e => ({...e})),
+        score: state.score,
+        frameCount: state.frameCount + 1,
+        startTime: state.startTime,
+        gameOver: state.gameOver
+      };
+
+      // Time left
+      const timeElapsed = Date.now() - newState.startTime;
+      const timeLeft = Math.max(0, gameDuration - timeElapsed);
+      if (timeLeft <= 0) {
+        newState.gameOver = true;
+        return newState;
+      }
+
+      // Apply input
+      if (input.left) newState.cannon.angle -= 0.05;
+      if (input.right) newState.cannon.angle += 0.05;
+      if (input.shoot) {
+        const speed = 5;
+        newState.projectiles.push({
+          x: newState.cannon.x,
+          y: newState.cannon.y,
+          vx: Math.cos(newState.cannon.angle) * speed,
+          vy: Math.sin(newState.cannon.angle) * speed
+        });
+      }
+
+      // Move projectiles
+      for (let i = newState.projectiles.length - 1; i >= 0; i--) {
+        const p = newState.projectiles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+          newState.projectiles.splice(i, 1);
+        }
+      }
+
+      // Move enemies
+      newState.enemies.forEach(e => {
+        e.x += e.vx;
+        e.y += e.vy;
+      });
+
+      // Collisions
+      for (let i = newState.enemies.length - 1; i >= 0; i--) {
+        for (let j = newState.projectiles.length - 1; j >= 0; j--) {
+          const dx = newState.enemies[i].x - newState.projectiles[j].x;
+          const dy = newState.enemies[i].y - newState.projectiles[j].y;
+          if (Math.hypot(dx, dy) < newState.enemies[i].radius) {
+            newState.enemies.splice(i, 1);
+            newState.projectiles.splice(j, 1);
+            newState.score++;
+            break;
+          }
+        }
+      }
+
+      return newState;
+    }
+
+    function spawnEnemy() {
+      const radius = 15;
+      const edge = Math.floor(Math.random() * 4);
+      let x, y;
+
+      if (edge === 0) { x = Math.random() * canvas.width; y = -radius; }
+      else if (edge === 1) { x = Math.random() * canvas.width; y = canvas.height + radius; }
+      else if (edge === 2) { x = -radius; y = Math.random() * canvas.height; }
+      else { x = canvas.width + radius; y = Math.random() * canvas.height; }
+
+      const dx = canvas.width / 2 - x;
+      const dy = canvas.height / 2 - y;
+      const dist = Math.hypot(dx, dy);
+      const speed = 1.5;
+
+      gameState.enemies.push({
+        x,
+        y,
+        vx: (dx / dist) * speed,
+        vy: (dy / dist) * speed,
+        radius
+      });
+    }
+
+    function draw(state) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Cannon
+      ctx.save();
+      ctx.translate(state.cannon.x, state.cannon.y);
+      ctx.rotate(state.cannon.angle);
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, -5, 40, 10);
+      ctx.beginPath();
+      ctx.arc(0, 0, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Projectiles
+      ctx.fillStyle = "red";
+      state.projectiles.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Enemies
+      ctx.fillStyle = "lime";
+      state.enemies.forEach(e => {
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      ctx.fillStyle = "white";
+      ctx.fillText("Score: " + state.score, 10, 20);
+
+      if (state.gameOver) {
+        ctx.fillText("GAME OVER", canvas.width / 2 - 40, canvas.height / 2);
+        document.getElementById("scoreDisplay").innerText = "Final Score: " + state.score;
+      }
+    }
+
+    
+    function gameLoop() {
+      if (gameState.gameOver) {
+        draw(gameState);
+        return;
+      }
+
+      // AI decides input and next state
+      const decision = getAIInput(gameState);
+      gameState = decision.nextState;
+
+      draw(gameState);
+      gameStates.push(gameState); // Store deep copy of state
+    }
+  
+    // Run at fixed 30 FPS
+    setInterval(gameLoop, 1000 / 30);
+
+    // Spawn enemies every second
+    setInterval(() => {
+      if (!gameState.gameOver) spawnEnemy();
+     
+    }, 1000);
+  </script>
+</body>
+</html>
