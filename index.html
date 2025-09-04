@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cannon Game</title>
+  <style>
+    canvas {
+      background: #111;
+      display: block;
+      margin: 0 auto;
+    }
+    body {
+      background: black;
+      color: white;
+      text-align: center;
+      font-family: sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <h1>Cannon Defense</h1>
+  <canvas id="gameCanvas" width="600" height="600"></canvas>
+  <h2 id="scoreDisplay"></h2>
+  <script>
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Initial game state
+    let gameState = {
+      cannon: { x: canvas.width/2, y: canvas.height/2, angle: 0, radius: 15 },
+      projectiles: [],
+      enemy: null, // Only one enemy
+      score: 0,
+      frameCount: 0,
+      startTime: Date.now(),
+      gameOver: false,
+      enemyCollided: false
+    };
+
+    const gameDuration = 10000; // 10 seconds
+
+    // --- WebSocket Setup ---
+    const ws = new WebSocket('ws://localhost:8081');
+    let aiInput = { left: false, right: false, shoot: false };
+
+    ws.onopen = () => {
+      console.log('Connected to WebSocket server');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        aiInput = JSON.parse(event.data);
+      } catch (e) {
+        console.error("Failed to parse AI input from server:", e);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('Disconnected from WebSocket server');
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+
+    // --- END WebSocket Setup ---
+
+    // The rest of your functions remain mostly the same, but with one key change in gameLoop
+
+    // Simulation step (simulateNextState is now a local function again for client-side use)
+    function simulateNextState(state, input) {
+        // ... (This function is the same as in your original HTML)
+        // You can keep it to simulate the next state locally for smoother visuals,
+        // or you can just apply the input and let the server handle the full simulation.
+        // For this simple example, we'll keep the logic here for client-side updates.
+      const newState = {
+        cannon: { ...state.cannon },
+        projectiles: state.projectiles.map(p => ({...p})),
+        enemy: state.enemy ? {...state.enemy} : null,
+        score: state.score,
+        frameCount: state.frameCount + 1,
+        startTime: state.startTime,
+        gameOver: state.gameOver,
+        enemyCollided: state.enemyCollided
+      };
+
+      // Apply input
+      if (input.left) newState.cannon.angle -= 0.05;
+      if (input.right) newState.cannon.angle += 0.05;
+      if (input.shoot) {
+        const speed = 5;
+        newState.projectiles.push({
+          x: newState.cannon.x,
+          y: newState.cannon.y,
+          vx: Math.cos(newState.cannon.angle) * speed,
+          vy: Math.sin(newState.cannon.angle) * speed
+        });
+      }
+
+      // Move projectiles
+      for (let i = newState.projectiles.length - 1; i >= 0; i--) {
+        const p = newState.projectiles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+          newState.projectiles.splice(i, 1);
+        }
+      }
+
+      // Move enemy
+      if (newState.enemy) {
+        newState.enemy.x += newState.enemy.vx;
+        newState.enemy.y += newState.enemy.vy;
+
+        const dxCannon = newState.enemy.x - newState.cannon.x;
+        const dyCannon = newState.enemy.y - newState.cannon.y;
+        if (Math.hypot(dxCannon, dyCannon) < newState.enemy.radius + newState.cannon.radius) {
+          newState.gameOver = true;
+          newState.enemyCollided = true;
+          return newState;
+        }
+      }
+      
+      // Collisions
+      if (newState.enemy && !newState.enemyCollided) {
+        for (let j = newState.projectiles.length - 1; j >= 0; j--) {
+          const dx = newState.enemy.x - newState.projectiles[j].x;
+          const dy = newState.enemy.y - newState.projectiles[j].y;
+          if (Math.hypot(dx, dy) < newState.enemy.radius) {
+            newState.enemy = null;
+            newState.projectiles.splice(j, 1);
+            newState.score++;
+            newState.gameOver = true;
+            break;
+          }
+        }
+      }
+
+      const timeElapsed = Date.now() - newState.startTime;
+      const timeLeft = Math.max(0, gameDuration - timeElapsed);
+      if (timeLeft <= 0) {
+        newState.gameOver = true;
+        return newState;
+      }
+
+      return newState;
+    }
+
+    function spawnEnemy() {
+        // This function remains the same
+        if (gameState.enemy) return; 
+        
+        const radius = 15;
+        const edge = Math.floor(Math.random() * 4);
+        let x, y;
+
+        if (edge === 0) { x = Math.random() * canvas.width; y = -radius; }
+        else if (edge === 1) { x = Math.random() * canvas.width; y = canvas.height + radius; }
+        else if (edge === 2) { x = -radius; y = Math.random() * canvas.height; }
+        else { x = canvas.width + radius; y = Math.random() * canvas.height; }
+
+        const dx = canvas.width / 2 - x;
+        const dy = canvas.height / 2 - y;
+        const dist = Math.hypot(dx, dy);
+        const speed = 1.5;
+
+        gameState.enemy = {
+          x,
+          y,
+          vx: (dx / dist) * speed,
+          vy: (dy / dist) * speed,
+          radius
+        };
+    }
+
+    function draw(state) {
+        // This function remains the same
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Cannon
+        ctx.save();
+        ctx.translate(state.cannon.x, state.cannon.y);
+        ctx.rotate(state.cannon.angle);
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, -5, 40, 10);
+        ctx.beginPath();
+        ctx.arc(0, 0, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        // Projectiles
+        ctx.fillStyle = "red";
+        state.projectiles.forEach(p => {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // Enemy
+        if (state.enemy) {
+          ctx.fillStyle = state.enemyCollided ? "yellow" : "lime";
+          ctx.beginPath();
+          ctx.arc(state.enemy.x, state.enemy.y, state.enemy.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.fillStyle = "white";
+        ctx.fillText("Score: " + state.score, 10, 20);
+
+        if (state.gameOver) {
+          ctx.fillText("GAME OVER", canvas.width / 2 - 40, canvas.height / 2);
+          document.getElementById("scoreDisplay").innerText = "Final Score: " + state.score;
+        }
+    }
+
+    function gameLoop() {
+      if (gameState.gameOver) {
+        draw(gameState);
+        return;
+      }
+
+      // 1. Send the current game state to the server
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(gameState));
+      }
+      console.log(aiInput)
+      // 2. Apply the last received AI input to update the game state
+      gameState = simulateNextState(gameState, aiInput);
+
+
+      // 3. Draw the new state
+      draw(gameState);
+    }
+    
+    // Run at fixed 30 FPS
+    setInterval(gameLoop, 1000 / 30);
+
+    // Spawn enemies every second
+    setInterval(() => {
+      if (!gameState.gameOver) spawnEnemy();
+    }, 1000);
+</script>
+ 
+</body>
+</html>
